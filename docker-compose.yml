@@ -5,7 +5,9 @@ services:
     ports:
       - "3000:3000"
     environment:
-      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - PROVIDER=${PROVIDER:-anthropic}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
       - YNAB_ACCESS_TOKEN=${YNAB_ACCESS_TOKEN}
       - PORT=3000
     restart: unless-stopped

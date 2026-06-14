@@ -4,6 +4,14 @@ let ynabBudgets = [];
 let ynabAccounts = [];
 let ynabCategoryGroups = [];
 let suggestedCategory = '';
+let providerLabel = 'AI';
+
+fetch('/api/config')
+  .then(r => r.json())
+  .then(({ provider }) => {
+    providerLabel = provider === 'gemini' ? 'Gemini' : 'Claude';
+  })
+  .catch(() => {});
 
 // ── View routing ───────────────────────────────────────────────────────────
 
@@ -45,6 +53,7 @@ async function compressImage(file) {
 
 async function handleFile(file) {
   if (!file) return;
+  document.querySelector('.processing-text').textContent = `${providerLabel} is reading your receipt…`;
   showView('view-processing');
 
   try {

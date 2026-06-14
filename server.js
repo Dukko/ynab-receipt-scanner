@@ -1,48 +1,45 @@
 import 'dotenv/config';
 import express from 'express';
 import Anthropic from '@anthropic-ai/sdk';
+import { GoogleGenAI } from '@google/genai';
 import { networkInterfaces } from 'os';
 
-const required = ['ANTHROPIC_API_KEY', 'YNAB_ACCESS_TOKEN'];
-const missing = required.filter(k => !process.env[k]);
-if (missing.length) {
-  console.error(`Missing required env vars: ${missing.join(', ')}`);
-  console.error('Copy .env.example to .env and fill in your keys.');
+const PROVIDER = (process.env.PROVIDER ?? 'anthropic').toLowerCase();
+const YNAB_BASE = 'https://api.youneedabudget.com/v1';
+
+// ── Startup validation ────────────────────────────────────────────────────────
+
+if (!process.env.YNAB_ACCESS_TOKEN) {
+  console.error('YNAB_ACCESS_TOKEN is required');
+  process.exit(1);
+}
+if (PROVIDER === 'anthropic' && !process.env.ANTHROPIC_API_KEY) {
+  console.error('ANTHROPIC_API_KEY is required when PROVIDER=anthropic');
+  process.exit(1);
+}
+if (PROVIDER === 'gemini' && !process.env.GEMINI_API_KEY) {
+  console.error('GEMINI_API_KEY is required when PROVIDER=gemini');
+  process.exit(1);
+}
+if (PROVIDER !== 'anthropic' && PROVIDER !== 'gemini') {
+  console.error(`Unknown PROVIDER "${PROVIDER}". Use "anthropic" or "gemini".`);
   process.exit(1);
 }
 
-const app = express();
-app.use(express.json({ limit: '20mb' }));
-app.use(express.static('public'));
+// ── AI clients ────────────────────────────────────────────────────────────────
 
-const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
-const YNAB_BASE = 'https://api.youneedabudget.com/v1';
+const anthropic = PROVIDER === 'anthropic'
+  ? new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
+  : null;
 
-// ── Claude receipt parsing ──────────────────────────────────────────────────
+const genai = PROVIDER === 'gemini'
+  ? new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY })
+  : null;
 
-app.post('/api/parse-receipt', async (req, res) => {
-  const { image, mediaType } = req.body;
-  if (!image || !mediaType) {
-    return res.status(400).json({ error: 'image and mediaType are required' });
-  }
+// ── Shared prompt ──────────────────────────────────────────────────────────────
 
-  const today = new Date().toISOString().split('T')[0];
-
-  try {
-    const stream = await anthropic.messages.stream({
-      model: 'claude-opus-4-8',
-      max_tokens: 1024,
-      thinking: { type: 'adaptive' },
-      messages: [{
-        role: 'user',
-        content: [
-          {
-            type: 'image',
-            source: { type: 'base64', media_type: mediaType, data: image }
-          },
-          {
-            type: 'text',
-            text: `Analyze this receipt image and extract the transaction details.
+function receiptPrompt(today) {
+  return `Analyze this receipt image and extract the transaction details.
 
 Return ONLY a valid JSON object with exactly these fields:
 {
@@ -55,16 +52,71 @@ Return ONLY a valid JSON object with exactly these fields:
 
 Rules:
 - total_amount is the FINAL amount paid (after tax/tip), as a positive decimal
-- Return only the JSON object, no markdown fences, no explanation`
-          }
-        ]
-      }]
-    });
+- Return only the JSON object, no markdown fences, no explanation`;
+}
 
-    const message = await stream.finalMessage();
-    const text = message.content.find(b => b.type === 'text')?.text ?? '';
-    const jsonStr = text.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '').trim();
-    const data = JSON.parse(jsonStr);
+function stripFences(text) {
+  return text.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '').trim();
+}
+
+// ── Provider implementations ──────────────────────────────────────────────────
+
+async function parseWithAnthropic(base64, mediaType, today) {
+  const stream = await anthropic.messages.stream({
+    model: 'claude-opus-4-8',
+    max_tokens: 1024,
+    thinking: { type: 'adaptive' },
+    messages: [{
+      role: 'user',
+      content: [
+        { type: 'image', source: { type: 'base64', media_type: mediaType, data: base64 } },
+        { type: 'text', text: receiptPrompt(today) }
+      ]
+    }]
+  });
+
+  const message = await stream.finalMessage();
+  const text = message.content.find(b => b.type === 'text')?.text ?? '';
+  return JSON.parse(stripFences(text));
+}
+
+async function parseWithGemini(base64, mediaType, today) {
+  const response = await genai.models.generateContent({
+    model: 'gemini-2.0-flash',
+    contents: [{
+      role: 'user',
+      parts: [
+        { inlineData: { mimeType: mediaType, data: base64 } },
+        { text: receiptPrompt(today) }
+      ]
+    }]
+  });
+
+  return JSON.parse(stripFences(response.text));
+}
+
+// ── Express app ───────────────────────────────────────────────────────────────
+
+const app = express();
+app.use(express.json({ limit: '20mb' }));
+app.use(express.static('public'));
+
+app.get('/api/config', (req, res) => {
+  res.json({ provider: PROVIDER });
+});
+
+app.post('/api/parse-receipt', async (req, res) => {
+  const { image, mediaType } = req.body;
+  if (!image || !mediaType) {
+    return res.status(400).json({ error: 'image and mediaType are required' });
+  }
+
+  const today = new Date().toISOString().split('T')[0];
+
+  try {
+    const data = PROVIDER === 'gemini'
+      ? await parseWithGemini(image, mediaType, today)
+      : await parseWithAnthropic(image, mediaType, today);
 
     res.json({ success: true, data });
   } catch (err) {
@@ -73,7 +125,7 @@ Rules:
   }
 });
 
-// ── YNAB proxy ───────────────────────────────────────────────────────────────
+// ── YNAB proxy ────────────────────────────────────────────────────────────────
 
 async function ynab(path, options = {}) {
   const response = await fetch(`${YNAB_BASE}${path}`, {
@@ -86,11 +138,7 @@ async function ynab(path, options = {}) {
   });
 
   const body = await response.json();
-
-  if (!response.ok) {
-    throw new Error(body.error?.detail ?? `YNAB ${response.status}`);
-  }
-
+  if (!response.ok) throw new Error(body.error?.detail ?? `YNAB ${response.status}`);
   return body.data;
 }
 
@@ -142,7 +190,11 @@ app.listen(PORT, '0.0.0.0', () => {
     .flat()
     .find(n => n.family === 'IPv4' && !n.internal)?.address;
 
-  console.log(`\n📄  YNAB Receipt Scanner`);
+  const providerLabel = PROVIDER === 'gemini'
+    ? 'Gemini 2.0 Flash'
+    : 'Claude Opus 4.8';
+
+  console.log(`\n📄  YNAB Receipt Scanner  [${providerLabel}]`);
   console.log(`    Local:   http://localhost:${PORT}`);
   if (ip) console.log(`    Network: http://${ip}:${PORT}`);
   console.log(`\nOpen the Network URL on your phone to use as a PWA.\n`);
