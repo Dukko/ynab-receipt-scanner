@@ -39,18 +39,26 @@ const genai = PROVIDER === 'gemini'
 // ── Shared prompt ──────────────────────────────────────────────────────────────
 
 function receiptPrompt(today) {
-  return `Analyze this receipt image and extract the transaction details.
+  return `Analyze this receipt and extract transaction details. Group line items by purchase category type.
 
-Return ONLY a valid JSON object with exactly these fields:
+Return ONLY a valid JSON object:
 {
   "merchant_name": "store or restaurant name",
   "date": "YYYY-MM-DD (use ${today} if unclear)",
   "total_amount": 0.00,
-  "memo": "1-sentence description of what was purchased",
-  "suggested_category": "one of: Food & Dining | Groceries | Gas & Fuel | Shopping | Entertainment | Healthcare | Transportation | Utilities | Other"
+  "memo": "1-sentence description of the overall purchase",
+  "splits": [
+    {
+      "category": "one of: Food & Dining | Groceries | Gas & Fuel | Shopping | Entertainment | Healthcare | Transportation | Utilities | Other",
+      "amount": 0.00,
+      "description": "brief description of items in this group"
+    }
+  ]
 }
 
 Rules:
+- Group items by category type; if all items are the same type, return one split with the full total
+- splits[].amount values must sum exactly to total_amount
 - total_amount is the FINAL amount paid (after tax/tip), as a positive decimal
 - Return only the JSON object, no markdown fences, no explanation`;
 }

@@ -1,16 +1,14 @@
 // ── State ──────────────────────────────────────────────────────────────────
 
-let ynabBudgets = [];
 let ynabAccounts = [];
-let ynabCategoryGroups = [];
-let suggestedCategory = '';
+let categoryList = []; // {id, name, groupName}
+let splits = [];       // {id, categoryId, categoryName, amount, description}
+let nextSplitId = 0;
 let providerLabel = 'AI';
 
 fetch('/api/config')
   .then(r => r.json())
-  .then(({ provider }) => {
-    providerLabel = provider === 'gemini' ? 'Gemini' : 'Claude';
-  })
+  .then(({ provider }) => { providerLabel = provider === 'gemini' ? 'Gemini' : 'Claude'; })
   .catch(() => {});
 
 // ── View routing ───────────────────────────────────────────────────────────
@@ -21,35 +19,101 @@ function showView(id) {
   window.scrollTo(0, 0);
 }
 
-// ── Image processing ───────────────────────────────────────────────────────
+// ── Autocomplete ───────────────────────────────────────────────────────────
+
+function createAutocomplete(input, getItems) {
+  const wrap = input.closest('.ac-wrap');
+  let dropdown = null;
+  let activeIdx = -1;
+
+  function open(items) {
+    close();
+    if (!items.length) return;
+
+    dropdown = document.createElement('ul');
+    dropdown.className = 'ac-list';
+
+    items.forEach(item => {
+      const li = document.createElement('li');
+      li.className = 'ac-item';
+      li.innerHTML = `<span class="ac-name">${esc(item.display)}</span>`
+        + (item.sub ? `<span class="ac-sub">${esc(item.sub)}</span>` : '');
+      li.addEventListener('mousedown', e => { e.preventDefault(); pick(item); });
+      dropdown.appendChild(li);
+    });
+
+    wrap.appendChild(dropdown);
+    activeIdx = -1;
+  }
+
+  function close() {
+    dropdown?.remove();
+    dropdown = null;
+    activeIdx = -1;
+  }
+
+  function pick(item) {
+    input.value = item.display;
+    input.dataset.acId = item.id ?? '';
+    close();
+    input.dispatchEvent(new CustomEvent('ac:select', { bubbles: true, detail: item }));
+  }
+
+  function setActive(n) {
+    if (!dropdown) return;
+    const items = dropdown.querySelectorAll('.ac-item');
+    items.forEach((li, i) => li.classList.toggle('active', i === n));
+    activeIdx = n;
+  }
+
+  input.addEventListener('input', () => {
+    input.dataset.acId = '';
+    open(getItems(input.value));
+  });
+  input.addEventListener('focus', () => open(getItems(input.value)));
+  input.addEventListener('blur', () => setTimeout(close, 150));
+  input.addEventListener('keydown', e => {
+    if (!dropdown) return;
+    const items = dropdown.querySelectorAll('.ac-item');
+    if (e.key === 'ArrowDown') { e.preventDefault(); setActive(Math.min(activeIdx + 1, items.length - 1)); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); setActive(Math.max(activeIdx - 1, 0)); }
+    else if (e.key === 'Enter') { e.preventDefault(); if (activeIdx >= 0) items[activeIdx].dispatchEvent(new MouseEvent('mousedown')); }
+    else if (e.key === 'Escape') close();
+  });
+
+  return { pick };
+}
+
+function esc(s) {
+  return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+// ── Image compression ──────────────────────────────────────────────────────
 
 async function compressImage(file) {
   return new Promise(resolve => {
     const img = new Image();
     const url = URL.createObjectURL(file);
-
     img.onload = () => {
       URL.revokeObjectURL(url);
-
       const MAX = 1600;
       let { width, height } = img;
       if (width > height ? width > MAX : height > MAX) {
         if (width > height) { height = (height * MAX) / width; width = MAX; }
         else { width = (width * MAX) / height; height = MAX; }
       }
-
       const canvas = document.createElement('canvas');
       canvas.width = Math.round(width);
       canvas.height = Math.round(height);
       canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
-
       const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
       resolve({ base64: dataUrl.split(',')[1], mediaType: 'image/jpeg', dataUrl });
     };
-
     img.src = url;
   });
 }
+
+// ── File handling ──────────────────────────────────────────────────────────
 
 async function handleFile(file) {
   if (!file) return;
@@ -65,21 +129,34 @@ async function handleFile(file) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ image: base64, mediaType })
     });
-
-    if (!res.ok) {
-      const err = await res.json();
-      throw new Error(err.error ?? 'Failed to parse receipt');
-    }
+    if (!res.ok) throw new Error((await res.json()).error ?? 'Failed to parse receipt');
 
     const { data } = await res.json();
 
     document.getElementById('payee-name').value = data.merchant_name ?? '';
     document.getElementById('txn-date').value = data.date ?? today();
-    document.getElementById('amount').value = data.total_amount != null
-      ? Number(data.total_amount).toFixed(2)
-      : '';
+    document.getElementById('amount').value = data.total_amount != null ? Number(data.total_amount).toFixed(2) : '';
     document.getElementById('memo').value = data.memo ?? '';
-    suggestedCategory = data.suggested_category ?? '';
+
+    // Build splits from AI response
+    splits = [];
+    nextSplitId = 0;
+    const aiSplits = data.splits?.length
+      ? data.splits
+      : [{ category: '', amount: data.total_amount ?? 0, description: data.memo ?? '' }];
+
+    aiSplits.forEach(s => splits.push({
+      id: nextSplitId++,
+      categoryId: null,
+      categoryName: s.category ?? '',
+      amount: Number(s.amount) || 0,
+      description: s.description ?? ''
+    }));
+
+    // Reset account
+    const accountInput = document.getElementById('account-input');
+    accountInput.value = '';
+    accountInput.dataset.acId = '';
 
     await loadYnabData();
     showView('view-review');
@@ -89,37 +166,26 @@ async function handleFile(file) {
   }
 }
 
-// ── YNAB data loading ──────────────────────────────────────────────────────
+// ── YNAB loading ───────────────────────────────────────────────────────────
 
 async function loadYnabData() {
   const budgetSel = document.getElementById('budget-select');
-  const accountSel = document.getElementById('account-select');
-  const catSel = document.getElementById('category-select');
-
   budgetSel.innerHTML = '<option>Loading…</option>';
-  accountSel.innerHTML = '<option>Loading…</option>';
-  catSel.innerHTML = '<option>Loading…</option>';
 
   try {
     const res = await fetch('/api/ynab/budgets');
     if (!res.ok) throw new Error((await res.json()).error ?? 'YNAB error');
     const { budgets } = await res.json();
 
-    ynabBudgets = budgets;
-    budgetSel.innerHTML = budgets.map(b =>
-      `<option value="${b.id}">${b.name}</option>`
-    ).join('');
-
-    if (budgets.length > 0) await loadBudgetData(budgets[0].id);
+    budgetSel.innerHTML = budgets.map(b => `<option value="${b.id}">${esc(b.name)}</option>`).join('');
+    if (budgets.length) await loadBudgetData(budgets[0].id);
   } catch (err) {
-    budgetSel.innerHTML = `<option>Error: ${err.message}</option>`;
+    budgetSel.innerHTML = `<option>Error: ${esc(err.message)}</option>`;
+    renderSplits();
   }
 }
 
 async function loadBudgetData(budgetId) {
-  const accountSel = document.getElementById('account-select');
-  const catSel = document.getElementById('category-select');
-
   try {
     const [acRes, catRes] = await Promise.all([
       fetch(`/api/ynab/budgets/${budgetId}/accounts`),
@@ -130,78 +196,194 @@ async function loadBudgetData(budgetId) {
     const { category_groups } = await catRes.json();
 
     ynabAccounts = accounts.filter(a => !a.closed && !a.deleted && a.on_budget);
-    ynabCategoryGroups = category_groups.filter(g => !g.deleted && !g.hidden);
 
-    accountSel.innerHTML = ynabAccounts.map(a =>
-      `<option value="${a.id}">${a.name}</option>`
-    ).join('');
+    categoryList = [];
+    category_groups
+      .filter(g => !g.deleted && !g.hidden)
+      .forEach(g => g.categories
+        .filter(c => !c.deleted && !c.hidden)
+        .forEach(c => categoryList.push({ id: c.id, name: c.name, groupName: g.name }))
+      );
 
-    catSel.innerHTML = '<option value="">Uncategorized</option>';
-    ynabCategoryGroups.forEach(group => {
-      const cats = group.categories.filter(c => !c.deleted && !c.hidden);
-      if (!cats.length) return;
-      const og = document.createElement('optgroup');
-      og.label = group.name;
-      cats.forEach(cat => {
-        const opt = document.createElement('option');
-        opt.value = cat.id;
-        opt.textContent = cat.name;
-        og.appendChild(opt);
-      });
-      catSel.appendChild(og);
+    // Reset account selection
+    const accountInput = document.getElementById('account-input');
+    accountInput.value = '';
+    accountInput.dataset.acId = '';
+
+    // Try to match splits to real YNAB categories, then render
+    splits.forEach(s => {
+      if (!s.categoryId && s.categoryName) {
+        const match = findCategory(s.categoryName);
+        if (match) { s.categoryId = match.id; s.categoryName = match.name; }
+      }
     });
 
-    matchCategory(catSel);
+    renderSplits();
   } catch (err) {
-    accountSel.innerHTML = `<option>Error: ${err.message}</option>`;
-    catSel.innerHTML = `<option>Error: ${err.message}</option>`;
+    console.error('Budget load error:', err);
+    renderSplits();
   }
 }
 
-function matchCategory(select) {
-  if (!suggestedCategory) return;
+// ── Filtering ─────────────────────────────────────────────────────────────
 
-  const keywords = {
-    'food & dining': ['dining', 'restaurant', 'food', 'cafe', 'coffee', 'pizza', 'sushi'],
-    'groceries': ['grocer', 'supermarket', 'market', 'food'],
+function filterAccounts(q) {
+  const lc = q.toLowerCase();
+  return (lc
+    ? ynabAccounts.filter(a => a.name.toLowerCase().includes(lc))
+    : ynabAccounts
+  ).map(a => ({ id: a.id, display: a.name }));
+}
+
+function filterCategories(q) {
+  const lc = q.toLowerCase();
+  return (lc
+    ? categoryList.filter(c => c.name.toLowerCase().includes(lc) || c.groupName.toLowerCase().includes(lc))
+    : categoryList
+  ).slice(0, 15).map(c => ({ id: c.id, display: c.name, sub: c.groupName }));
+}
+
+function findCategory(suggested) {
+  const lc = suggested.toLowerCase();
+
+  // Exact match first
+  const exact = categoryList.find(c => c.name.toLowerCase() === lc);
+  if (exact) return exact;
+
+  // Keyword fuzzy match
+  const kws = {
+    'food & dining': ['dining', 'restaurant', 'food', 'cafe', 'coffee', 'pizza', 'takeout'],
+    'groceries': ['grocer', 'supermarket', 'market', 'produce'],
     'gas & fuel': ['gas', 'fuel', 'petrol', 'auto'],
     'shopping': ['shopping', 'clothing', 'amazon', 'retail', 'electronics'],
-    'entertainment': ['entertainment', 'fun', 'hobbies', 'game', 'movie', 'streaming'],
-    'healthcare': ['health', 'medical', 'pharmacy', 'doctor', 'dental', 'hospital'],
-    'transportation': ['transport', 'transit', 'uber', 'lyft', 'taxi', 'travel', 'flight'],
-    'utilities': ['utilities', 'electric', 'water', 'internet', 'phone', 'cable']
+    'entertainment': ['entertainment', 'hobbies', 'streaming', 'movie', 'game'],
+    'healthcare': ['health', 'medical', 'pharmacy', 'doctor', 'dental'],
+    'transportation': ['transport', 'transit', 'uber', 'lyft', 'taxi', 'travel'],
+    'utilities': ['utilities', 'electric', 'water', 'internet', 'phone']
   };
 
-  const kws = keywords[suggestedCategory.toLowerCase()] ?? [suggestedCategory.toLowerCase()];
+  const words = Object.entries(kws).find(([k]) => lc === k || lc.includes(k))?.[1] ?? [lc];
+  return categoryList.find(c => {
+    const cn = c.name.toLowerCase(), gn = c.groupName.toLowerCase();
+    return words.some(w => cn.includes(w) || gn.includes(w));
+  }) ?? null;
+}
 
-  for (const group of ynabCategoryGroups) {
-    for (const cat of group.categories) {
-      const name = cat.name.toLowerCase();
-      if (kws.some(k => name.includes(k))) {
-        select.value = cat.id;
-        return;
+// ── Splits rendering ───────────────────────────────────────────────────────
+
+function renderSplits() {
+  const container = document.getElementById('splits-list');
+  container.innerHTML = '';
+
+  splits.forEach(split => {
+    const row = document.createElement('div');
+    row.className = 'split-row';
+
+    // Category autocomplete
+    const catWrap = document.createElement('div');
+    catWrap.className = 'ac-wrap';
+    const catInput = document.createElement('input');
+    catInput.type = 'text';
+    catInput.className = 'split-cat';
+    catInput.placeholder = 'Category…';
+    catInput.autocomplete = 'off';
+    catInput.value = split.categoryName;
+    if (split.categoryId) catInput.dataset.acId = split.categoryId;
+    catWrap.appendChild(catInput);
+
+    // Amount
+    const amtInput = document.createElement('input');
+    amtInput.type = 'number';
+    amtInput.className = 'split-amt';
+    amtInput.placeholder = '0.00';
+    amtInput.step = '0.01';
+    amtInput.inputMode = 'decimal';
+    amtInput.min = '0';
+    if (split.amount > 0) amtInput.value = split.amount.toFixed(2);
+
+    // Remove button
+    const removeBtn = document.createElement('button');
+    removeBtn.type = 'button';
+    removeBtn.className = 'split-remove';
+    removeBtn.textContent = '×';
+    removeBtn.disabled = splits.length === 1;
+
+    row.appendChild(catWrap);
+    row.appendChild(amtInput);
+    row.appendChild(removeBtn);
+    container.appendChild(row); // must be in DOM before creating autocomplete
+
+    // Wire up autocomplete
+    createAutocomplete(catInput, filterCategories);
+    catInput.addEventListener('ac:select', e => {
+      split.categoryId = e.detail.id;
+      split.categoryName = e.detail.display;
+    });
+    catInput.addEventListener('change', () => {
+      if (!catInput.dataset.acId) {
+        split.categoryId = null;
+        split.categoryName = catInput.value;
       }
-    }
+    });
+
+    amtInput.addEventListener('input', () => {
+      split.amount = parseFloat(amtInput.value) || 0;
+      updateSplitTotal();
+    });
+
+    removeBtn.addEventListener('click', () => {
+      splits = splits.filter(s => s.id !== split.id);
+      renderSplits();
+    });
+  });
+
+  updateSplitTotal();
+}
+
+function updateSplitTotal() {
+  const el = document.getElementById('split-total');
+  if (splits.length <= 1) { el.textContent = ''; el.className = 'split-total-info'; return; }
+
+  const total = parseFloat(document.getElementById('amount').value) || 0;
+  const sum = Math.round(splits.reduce((a, s) => a + s.amount, 0) * 100) / 100;
+  const diff = Math.round((total - sum) * 100) / 100;
+
+  if (Math.abs(diff) < 0.01) {
+    el.textContent = `✓ Splits total $${sum.toFixed(2)}`;
+    el.className = 'split-total-info ok';
+  } else {
+    el.textContent = `$${sum.toFixed(2)} of $${total.toFixed(2)} · ${diff > 0 ? '+' : ''}$${diff.toFixed(2)} remaining`;
+    el.className = 'split-total-info warn';
   }
 }
 
-// ── Submit transaction ─────────────────────────────────────────────────────
+// ── Transaction submission ─────────────────────────────────────────────────
 
 async function submitTransaction(e) {
   e.preventDefault();
 
   const budgetId = document.getElementById('budget-select').value;
-  const accountId = document.getElementById('account-select').value;
-  const categoryId = document.getElementById('category-select').value || null;
   const payeeName = document.getElementById('payee-name').value.trim();
   const date = document.getElementById('txn-date').value;
-  const amount = parseFloat(document.getElementById('amount').value);
+  const totalAmount = parseFloat(document.getElementById('amount').value);
   const memo = document.getElementById('memo').value.trim() || null;
   const cleared = document.getElementById('cleared').checked;
 
-  if (!budgetId || !accountId || !payeeName || !date || isNaN(amount)) {
-    alert('Please fill in all required fields.');
-    return;
+  const accountInput = document.getElementById('account-input');
+  const accountId = accountInput.dataset.acId;
+
+  if (!payeeName || !date || isNaN(totalAmount)) {
+    alert('Please fill in payee, date, and amount.'); return;
+  }
+  if (!accountId) {
+    alert('Please select an account from the dropdown.'); accountInput.focus(); return;
+  }
+
+  if (splits.length > 1) {
+    const sum = Math.round(splits.reduce((a, s) => a + s.amount, 0) * 100) / 100;
+    if (Math.abs(sum - totalAmount) > 0.01) {
+      alert(`Split amounts ($${sum.toFixed(2)}) must equal the total ($${totalAmount.toFixed(2)}).`); return;
+    }
   }
 
   const btn = document.getElementById('submit-btn');
@@ -209,33 +391,45 @@ async function submitTransaction(e) {
   btn.textContent = 'Adding…';
 
   try {
+    const totalMill = Math.round(totalAmount * 1000) * -1;
+    let transaction;
+
+    if (splits.length > 1) {
+      transaction = {
+        account_id: accountId, date, amount: totalMill,
+        payee_name: payeeName, memo,
+        cleared: cleared ? 'cleared' : 'uncleared',
+        subtransactions: splits.map(s => ({
+          amount: Math.round(s.amount * 1000) * -1,
+          category_id: s.categoryId || null,
+          memo: s.description || null
+        }))
+      };
+    } else {
+      transaction = {
+        account_id: accountId, date, amount: totalMill,
+        payee_name: payeeName,
+        category_id: splits[0]?.categoryId || null,
+        memo, cleared: cleared ? 'cleared' : 'uncleared'
+      };
+    }
+
     const res = await fetch(`/api/ynab/budgets/${budgetId}/transactions`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        transaction: {
-          account_id: accountId,
-          date,
-          amount: Math.round(amount * 1000) * -1, // outflow = negative milliunits
-          payee_name: payeeName,
-          category_id: categoryId,
-          memo,
-          cleared: cleared ? 'cleared' : 'uncleared'
-        }
-      })
+      body: JSON.stringify({ transaction })
     });
-
-    if (!res.ok) {
-      const err = await res.json();
-      throw new Error(err.error ?? 'Failed to create transaction');
-    }
+    if (!res.ok) throw new Error((await res.json()).error ?? 'Failed to create transaction');
 
     const accountName = ynabAccounts.find(a => a.id === accountId)?.name ?? accountId;
-
     document.getElementById('success-payee').textContent = payeeName;
-    document.getElementById('success-amount').textContent = `$${amount.toFixed(2)}`;
+    document.getElementById('success-amount').textContent = `$${totalAmount.toFixed(2)}`;
     document.getElementById('success-account').textContent = accountName;
-    document.getElementById('success-icon').classList.add('bounce');
+
+    const icon = document.getElementById('success-icon');
+    icon.classList.remove('bounce');
+    void icon.offsetWidth;
+    icon.classList.add('bounce');
 
     showView('view-success');
   } catch (err) {
@@ -248,40 +442,32 @@ async function submitTransaction(e) {
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
-function today() {
-  return new Date().toISOString().split('T')[0];
-}
-
-function showError(msg) {
-  document.getElementById('error-message').textContent = msg;
-  showView('view-error');
-}
-
-function resetFileInput(id) {
-  document.getElementById(id).value = '';
-}
+function today() { return new Date().toISOString().split('T')[0]; }
+function showError(msg) { document.getElementById('error-message').textContent = msg; showView('view-error'); }
+function resetInput(id) { document.getElementById(id).value = ''; }
 
 // ── Event listeners ──────────────────────────────────────────────────────────
 
-document.getElementById('file-camera').addEventListener('change', e => {
-  handleFile(e.target.files[0]);
-  resetFileInput('file-camera');
-});
+document.getElementById('file-camera').addEventListener('change', e => { handleFile(e.target.files[0]); resetInput('file-camera'); });
+document.getElementById('file-upload').addEventListener('change', e => { handleFile(e.target.files[0]); resetInput('file-upload'); });
 
-document.getElementById('file-upload').addEventListener('change', e => {
-  handleFile(e.target.files[0]);
-  resetFileInput('file-upload');
-});
-
-document.getElementById('budget-select').addEventListener('change', e => {
-  if (e.target.value) loadBudgetData(e.target.value);
-});
+document.getElementById('budget-select').addEventListener('change', e => { if (e.target.value) loadBudgetData(e.target.value); });
 
 document.getElementById('back-to-scan').addEventListener('click', () => showView('view-scan'));
 document.getElementById('error-back').addEventListener('click', () => showView('view-scan'));
 document.getElementById('scan-another').addEventListener('click', () => showView('view-scan'));
 
+document.getElementById('add-split-btn').addEventListener('click', () => {
+  splits.push({ id: nextSplitId++, categoryId: null, categoryName: '', amount: 0, description: '' });
+  renderSplits();
+  document.querySelectorAll('.split-cat').forEach((el, i, arr) => { if (i === arr.length - 1) el.focus(); });
+});
+
+document.getElementById('amount').addEventListener('input', updateSplitTotal);
 document.getElementById('txn-form').addEventListener('submit', submitTransaction);
+
+// Account autocomplete (created once; filterAccounts reads ynabAccounts dynamically)
+createAutocomplete(document.getElementById('account-input'), filterAccounts);
 
 // ── Service worker ───────────────────────────────────────────────────────────
 

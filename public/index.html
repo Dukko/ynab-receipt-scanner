@@ -79,13 +79,19 @@
       </div>
 
       <div class="form-group">
-        <label for="account-select">Account</label>
-        <select id="account-select"></select>
+        <label for="account-input">Account</label>
+        <div class="ac-wrap">
+          <input type="text" id="account-input" autocomplete="off" placeholder="Type to search…">
+        </div>
       </div>
 
       <div class="form-group">
-        <label for="category-select">Category</label>
-        <select id="category-select"></select>
+        <div class="splits-header">
+          <label>Categories</label>
+          <button type="button" id="add-split-btn" class="add-split-btn">+ Add split</button>
+        </div>
+        <div id="splits-list"></div>
+        <p id="split-total" class="split-total-info"></p>
       </div>
 
       <div class="form-group">

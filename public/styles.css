@@ -277,6 +277,128 @@ label.btn-secondary input { display: none; }
 }
 .result-card .account { color: var(--muted); font-size: 0.9rem; }
 
+/* ── Autocomplete ────────────────────────────────────────────────────────────  */
+
+.ac-wrap { position: relative; }
+
+/* Autocomplete input inside form-group inherits the same base style */
+.ac-wrap input {
+  width: 100%;
+  padding: 13px 14px;
+  background: var(--card);
+  border: 1.5px solid var(--border);
+  border-radius: 12px;
+  color: var(--text);
+  font-size: 0.95rem;
+  transition: border-color 0.2s;
+  -webkit-appearance: none;
+  appearance: none;
+}
+.ac-wrap input:focus { outline: none; border-color: var(--accent); }
+
+.ac-list {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0; right: 0;
+  background: var(--card);
+  border: 1.5px solid var(--accent);
+  border-radius: 12px;
+  max-height: 220px;
+  overflow-y: auto;
+  z-index: 200;
+  list-style: none;
+  box-shadow: 0 8px 28px rgba(0,0,0,0.45);
+}
+
+.ac-item {
+  padding: 10px 14px;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  border-bottom: 1px solid var(--border);
+}
+.ac-item:last-child { border-bottom: none; }
+.ac-item:hover, .ac-item.active { background: rgba(99,102,241,0.18); }
+.ac-name { font-size: 0.9rem; color: var(--text); }
+.ac-sub  { font-size: 0.72rem; color: var(--muted); }
+
+/* ── Splits ──────────────────────────────────────────────────────────────────  */
+
+.splits-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+.splits-header label { margin-bottom: 0; }
+
+.add-split-btn {
+  background: none;
+  border: 1.5px solid var(--accent);
+  color: var(--accent);
+  font-size: 0.75rem;
+  font-weight: 700;
+  padding: 4px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+  letter-spacing: 0.02em;
+  transition: background 0.15s;
+}
+.add-split-btn:hover { background: rgba(99,102,241,0.15); }
+
+.split-row {
+  display: grid;
+  grid-template-columns: 1fr 84px 38px;
+  gap: 6px;
+  align-items: start;
+  margin-bottom: 8px;
+}
+
+.split-cat, .split-amt {
+  padding: 12px 12px;
+  background: var(--card);
+  border: 1.5px solid var(--border);
+  border-radius: 12px;
+  color: var(--text);
+  font-size: 0.9rem;
+  width: 100%;
+  transition: border-color 0.2s;
+  -webkit-appearance: none;
+  appearance: none;
+}
+.split-cat:focus, .split-amt:focus { outline: none; border-color: var(--accent); }
+.split-amt { text-align: right; padding-right: 10px; }
+
+.split-remove {
+  width: 38px;
+  height: 42px;
+  background: none;
+  border: 1.5px solid var(--border);
+  border-radius: 10px;
+  color: var(--muted);
+  font-size: 1rem;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  flex-shrink: 0;
+  transition: border-color 0.15s, color 0.15s;
+}
+.split-remove:not(:disabled):hover { border-color: var(--error); color: var(--error); }
+.split-remove:disabled { opacity: 0.25; cursor: default; }
+
+.split-total-info {
+  font-size: 0.78rem;
+  text-align: right;
+  margin-top: 2px;
+  min-height: 1.2em;
+  color: var(--muted);
+}
+.split-total-info.ok   { color: var(--success); }
+.split-total-info.warn { color: #f59e0b; }
+
 /* ── Error view ──────────────────────────────────────────────────────────────  */
 
 .error-box {
