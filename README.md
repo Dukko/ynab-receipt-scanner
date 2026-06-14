@@ -30,7 +30,7 @@ git clone https://github.com/Dukko/ynab-receipt-scanner.git
 cd ynab-receipt-scanner
 ```
 
-Create a `.env` file (never committed):
+You can supply credentials via a `.env` file (never committed):
 
 ```env
 ANTHROPIC_API_KEY=sk-ant-...
@@ -43,6 +43,14 @@ Or to use Gemini instead:
 GEMINI_API_KEY=AIza...
 YNAB_ACCESS_TOKEN=...
 PROVIDER=gemini
+```
+
+Alternatively, declare them directly in `docker-compose.yml` under the `environment` key:
+
+```yaml
+environment:
+  - YNAB_ACCESS_TOKEN=...
+  - ANTHROPIC_API_KEY=sk-ant-...
 ```
 
 **Getting your tokens:**
