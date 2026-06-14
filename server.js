@@ -82,7 +82,7 @@ async function parseWithAnthropic(base64, mediaType, today) {
 
 async function parseWithGemini(base64, mediaType, today) {
   const response = await genai.models.generateContent({
-    model: 'gemini-2.0-flash',
+    model: 'gemini-2.5-flash',
     contents: [{
       role: 'user',
       parts: [
@@ -191,7 +191,7 @@ app.listen(PORT, '0.0.0.0', () => {
     .find(n => n.family === 'IPv4' && !n.internal)?.address;
 
   const providerLabel = PROVIDER === 'gemini'
-    ? 'Gemini 2.0 Flash'
+    ? 'Gemini 2.5 Flash'
     : 'Claude Opus 4.8';
 
   console.log(`\n📄  YNAB Receipt Scanner  [${providerLabel}]`);
