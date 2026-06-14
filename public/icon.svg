@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="g" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#6366f1"/>
+      <stop offset="100%" stop-color="#8b5cf6"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="96" fill="#0f0f23"/>
+  <!-- Receipt body -->
+  <rect x="136" y="72" width="240" height="368" rx="12" fill="url(#g)" opacity="0.15"/>
+  <rect x="148" y="84" width="216" height="344" rx="8" fill="#1a1a35"/>
+  <!-- Zigzag bottom of receipt -->
+  <path d="M148 392 L164 376 L180 392 L196 376 L212 392 L228 376 L244 392 L260 376 L276 392 L292 376 L308 392 L324 376 L340 392 L356 376 L364 392 L364 428 L148 428 Z" fill="#0f0f23"/>
+  <!-- Receipt lines -->
+  <rect x="176" y="120" width="160" height="14" rx="7" fill="url(#g)"/>
+  <rect x="176" y="156" width="130" height="10" rx="5" fill="#2d2d4e"/>
+  <rect x="176" y="180" width="110" height="10" rx="5" fill="#2d2d4e"/>
+  <rect x="176" y="204" width="145" height="10" rx="5" fill="#2d2d4e"/>
+  <rect x="176" y="228" width="95" height="10" rx="5" fill="#2d2d4e"/>
+  <rect x="176" y="256" width="160" height="2" rx="1" fill="#2d2d4e"/>
+  <!-- Total amount line -->
+  <rect x="176" y="276" width="72" height="14" rx="7" fill="#6366f1"/>
+  <rect x="264" y="276" width="72" height="14" rx="7" fill="#8b5cf6"/>
+</svg>

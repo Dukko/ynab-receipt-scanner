@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Receipt Scanner</title>
+  <link rel="manifest" href="/manifest.json">
+  <link rel="apple-touch-icon" href="/icon.svg">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Receipts">
+  <meta name="theme-color" content="#6366f1">
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+
+<!-- ── Scan ──────────────────────────────────────────────────────────────── -->
+<div id="view-scan" class="view">
+  <header>
+    <h1>🧾 Receipt Scanner</h1>
+  </header>
+  <main class="scan-main">
+    <div class="scan-area">
+      <div class="scan-icon">📄</div>
+      <p>Snap a receipt and Claude will extract the details, then add it to YNAB.</p>
+
+      <label class="btn-primary">
+        📷 Take Photo
+        <input type="file" id="file-camera" accept="image/*" capture="environment">
+      </label>
+
+      <label class="btn-secondary">
+        📁 Choose from Library
+        <input type="file" id="file-upload" accept="image/*">
+      </label>
+    </div>
+  </main>
+</div>
+
+<!-- ── Processing ────────────────────────────────────────────────────────── -->
+<div id="view-processing" class="view">
+  <header><h1>Scanning…</h1></header>
+  <main class="processing-main">
+    <div class="spinner"></div>
+    <p class="processing-text">Claude is reading your receipt…</p>
+  </main>
+</div>
+
+<!-- ── Review ────────────────────────────────────────────────────────────── -->
+<div id="view-review" class="view">
+  <header>
+    <button class="icon-btn" id="back-to-scan">← Back</button>
+    <h1>Review</h1>
+  </header>
+  <main class="review-main">
+    <div class="receipt-thumb">
+      <img id="receipt-img" alt="Receipt preview">
+    </div>
+
+    <form id="txn-form">
+      <div class="form-group">
+        <label for="payee-name">Payee</label>
+        <input type="text" id="payee-name" autocomplete="off" required>
+      </div>
+
+      <div class="form-group">
+        <label for="txn-date">Date</label>
+        <input type="date" id="txn-date" required>
+      </div>
+
+      <div class="form-group">
+        <label for="amount">Amount (USD)</label>
+        <input type="number" id="amount" step="0.01" min="0.01" inputmode="decimal" required>
+      </div>
+
+      <div class="form-group">
+        <label for="budget-select">Budget</label>
+        <select id="budget-select"></select>
+      </div>
+
+      <div class="form-group">
+        <label for="account-select">Account</label>
+        <select id="account-select"></select>
+      </div>
+
+      <div class="form-group">
+        <label for="category-select">Category</label>
+        <select id="category-select"></select>
+      </div>
+
+      <div class="form-group">
+        <label for="memo">Memo</label>
+        <input type="text" id="memo" autocomplete="off">
+      </div>
+
+      <div class="form-group">
+        <label class="checkbox-row">
+          <input type="checkbox" id="cleared" checked>
+          <span>Mark as cleared</span>
+        </label>
+      </div>
+
+      <button type="submit" class="submit-btn" id="submit-btn">Add to YNAB →</button>
+    </form>
+  </main>
+</div>
+
+<!-- ── Success ────────────────────────────────────────────────────────────── -->
+<div id="view-success" class="view">
+  <header><h1>Added!</h1></header>
+  <main class="center-main">
+    <div class="big-icon" id="success-icon">🎉</div>
+    <div class="result-card">
+      <p class="payee" id="success-payee"></p>
+      <p class="amount" id="success-amount"></p>
+      <p class="account" id="success-account"></p>
+    </div>
+    <button class="submit-btn" id="scan-another">Scan Another →</button>
+  </main>
+</div>
+
+<!-- ── Error ──────────────────────────────────────────────────────────────── -->
+<div id="view-error" class="view">
+  <header>
+    <button class="icon-btn" id="error-back">← Back</button>
+    <h1>Something went wrong</h1>
+  </header>
+  <main class="center-main">
+    <div class="big-icon">⚠️</div>
+    <p class="error-box" id="error-message"></p>
+    <button class="submit-btn" id="error-back-btn" onclick="document.getElementById('error-back').click()">Try Again</button>
+  </main>
+</div>
+
+<script src="/app.js"></script>
+</body>
+</html>
