@@ -164,7 +164,7 @@ label.btn-secondary input { display: none; }
 
 .form-group { margin-bottom: 14px; }
 
-.form-group label {
+.form-group label:not(.checkbox-row) {
   display: block;
   font-size: 0.72rem;
   font-weight: 700;
