@@ -11,6 +11,9 @@ fetch('/api/config')
   .then(({ provider }) => { providerLabel = provider === 'gemini' ? 'Gemini' : 'Claude'; })
   .catch(() => {});
 
+// Pre-load YNAB categories silently so they're ready before the first scan
+preloadYnabData();
+
 // ── View routing ───────────────────────────────────────────────────────────
 
 function showView(id) {
@@ -124,10 +127,15 @@ async function handleFile(file) {
     const { base64, mediaType, dataUrl } = await compressImage(file);
     document.getElementById('receipt-img').src = dataUrl;
 
+    // Include real YNAB categories if already loaded (from background preload)
+    const categories = categoryList.length
+      ? categoryList.map(c => `${c.name} (${c.groupName})`).join('\n')
+      : undefined;
+
     const res = await fetch('/api/parse-receipt', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ image: base64, mediaType })
+      body: JSON.stringify({ image: base64, mediaType, categories })
     });
     if (!res.ok) throw new Error((await res.json()).error ?? 'Failed to parse receipt');
 
@@ -168,6 +176,38 @@ async function handleFile(file) {
 
 // ── YNAB loading ───────────────────────────────────────────────────────────
 
+// Fetches accounts + categories into state — no DOM side-effects.
+// Called both at startup (preload) and when the review form is shown.
+async function fetchBudgetData(budgetId) {
+  const [acRes, catRes] = await Promise.all([
+    fetch(`/api/ynab/budgets/${budgetId}/accounts`),
+    fetch(`/api/ynab/budgets/${budgetId}/categories`)
+  ]);
+
+  const { accounts } = await acRes.json();
+  const { category_groups } = await catRes.json();
+
+  ynabAccounts = accounts.filter(a => !a.closed && !a.deleted && a.on_budget);
+
+  categoryList = [];
+  category_groups
+    .filter(g => !g.deleted && !g.hidden)
+    .forEach(g => g.categories
+      .filter(c => !c.deleted && !c.hidden)
+      .forEach(c => categoryList.push({ id: c.id, name: c.name, groupName: g.name }))
+    );
+}
+
+// Silent background fetch on startup so categories are ready before the first scan.
+async function preloadYnabData() {
+  try {
+    const res = await fetch('/api/ynab/budgets');
+    if (!res.ok) return;
+    const { budgets } = await res.json();
+    if (budgets.length) await fetchBudgetData(budgets[0].id);
+  } catch { /* silently ignore — review screen will load data anyway */ }
+}
+
 async function loadYnabData() {
   const budgetSel = document.getElementById('budget-select');
   budgetSel.innerHTML = '<option>Loading…</option>';
@@ -187,30 +227,14 @@ async function loadYnabData() {
 
 async function loadBudgetData(budgetId) {
   try {
-    const [acRes, catRes] = await Promise.all([
-      fetch(`/api/ynab/budgets/${budgetId}/accounts`),
-      fetch(`/api/ynab/budgets/${budgetId}/categories`)
-    ]);
-
-    const { accounts } = await acRes.json();
-    const { category_groups } = await catRes.json();
-
-    ynabAccounts = accounts.filter(a => !a.closed && !a.deleted && a.on_budget);
-
-    categoryList = [];
-    category_groups
-      .filter(g => !g.deleted && !g.hidden)
-      .forEach(g => g.categories
-        .filter(c => !c.deleted && !c.hidden)
-        .forEach(c => categoryList.push({ id: c.id, name: c.name, groupName: g.name }))
-      );
+    await fetchBudgetData(budgetId);
 
     // Reset account selection
     const accountInput = document.getElementById('account-input');
     accountInput.value = '';
     accountInput.dataset.acId = '';
 
-    // Try to match splits to real YNAB categories, then render
+    // Match split category names to real YNAB categories, then render
     splits.forEach(s => {
       if (!s.categoryId && s.categoryName) {
         const match = findCategory(s.categoryName);

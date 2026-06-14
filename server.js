@@ -38,8 +38,19 @@ const genai = PROVIDER === 'gemini'
 
 // ── Shared prompt ──────────────────────────────────────────────────────────────
 
-function receiptPrompt(today) {
+function receiptPrompt(today, categories) {
+  const catInstruction = categories
+    ? `The user's YNAB budget categories are listed below (name followed by group in parentheses).
+For each split, pick the single best-matching category name EXACTLY as written — spelling and capitalisation must match:
+
+${categories}
+
+If no category fits well, use the closest one rather than inventing a new name.`
+    : `For each split use a general label such as: Groceries | Food & Dining | Gas & Fuel | Shopping | Entertainment | Healthcare | Transportation | Utilities | Other`;
+
   return `Analyze this receipt and extract transaction details. Group line items by purchase category type.
+
+${catInstruction}
 
 Return ONLY a valid JSON object:
 {
@@ -49,7 +60,7 @@ Return ONLY a valid JSON object:
   "memo": "1-sentence description of the overall purchase",
   "splits": [
     {
-      "category": "one of: Food & Dining | Groceries | Gas & Fuel | Shopping | Entertainment | Healthcare | Transportation | Utilities | Other",
+      "category": "category name",
       "amount": 0.00,
       "description": "brief description of items in this group"
     }
@@ -69,7 +80,7 @@ function stripFences(text) {
 
 // ── Provider implementations ──────────────────────────────────────────────────
 
-async function parseWithAnthropic(base64, mediaType, today) {
+async function parseWithAnthropic(base64, mediaType, today, categories) {
   const stream = await anthropic.messages.stream({
     model: 'claude-opus-4-8',
     max_tokens: 1024,
@@ -78,7 +89,7 @@ async function parseWithAnthropic(base64, mediaType, today) {
       role: 'user',
       content: [
         { type: 'image', source: { type: 'base64', media_type: mediaType, data: base64 } },
-        { type: 'text', text: receiptPrompt(today) }
+        { type: 'text', text: receiptPrompt(today, categories) }
       ]
     }]
   });
@@ -88,14 +99,14 @@ async function parseWithAnthropic(base64, mediaType, today) {
   return JSON.parse(stripFences(text));
 }
 
-async function parseWithGemini(base64, mediaType, today) {
+async function parseWithGemini(base64, mediaType, today, categories) {
   const response = await genai.models.generateContent({
     model: 'gemini-2.5-flash',
     contents: [{
       role: 'user',
       parts: [
         { inlineData: { mimeType: mediaType, data: base64 } },
-        { text: receiptPrompt(today) }
+        { text: receiptPrompt(today, categories) }
       ]
     }]
   });
@@ -114,7 +125,7 @@ app.get('/api/config', (req, res) => {
 });
 
 app.post('/api/parse-receipt', async (req, res) => {
-  const { image, mediaType } = req.body;
+  const { image, mediaType, categories } = req.body;
   if (!image || !mediaType) {
     return res.status(400).json({ error: 'image and mediaType are required' });
   }
@@ -123,8 +134,8 @@ app.post('/api/parse-receipt', async (req, res) => {
 
   try {
     const data = PROVIDER === 'gemini'
-      ? await parseWithGemini(image, mediaType, today)
-      : await parseWithAnthropic(image, mediaType, today);
+      ? await parseWithGemini(image, mediaType, today, categories)
+      : await parseWithAnthropic(image, mediaType, today, categories);
 
     res.json({ success: true, data });
   } catch (err) {
