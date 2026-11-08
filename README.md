@@ -1,3 +1,5 @@
+> **No longer maintained** — This project is no longer maintained as of November 2026. It works as-is, but there will be no further updates or bug fixes. Feel free to fork it.
+
 # YNAB Receipt Scanner
 
 A self-hosted PWA that photographs receipts, uses AI vision to extract and categorise the line items, and creates YNAB transactions — all from your phone.
